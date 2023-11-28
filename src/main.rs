@@ -2,55 +2,56 @@ use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
 
+use juniper::graphql_interface;
 use juniper::graphql_object;
 use juniper::EmptyMutation;
 use juniper::EmptySubscription;
+use juniper::GraphQLObject;
 use juniper::RootNode;
 use juniper::ID;
 use warp::Filter;
 
 #[derive(Clone)]
 struct Context {
+    // TODO: Serialize the JSON into proper structs
     data: Arc<serde_json::Map<String, serde_json::Value>>,
 }
 
 impl juniper::Context for Context {}
 
+#[graphql_interface(for = [Film, Person])]
+trait Node {
+    fn id(&self) -> &ID;
+}
+
+#[derive(GraphQLObject)]
+#[graphql(impl = NodeValue)]
 struct Film {
     id: ID,
     title: String,
 }
 
-#[graphql_object(context = Context)]
-impl Film {
+impl Node for Film {
     fn id(&self) -> &ID {
         &self.id
     }
-
-    fn title(&self) -> &str {
-        &self.title
-    }
 }
 
+#[derive(GraphQLObject)]
+#[graphql(impl = NodeValue)]
 struct Person {
     id: ID,
     name: String,
 }
 
-#[graphql_object(context = Context)]
-impl Person {
+impl Node for Person {
     fn id(&self) -> &ID {
         &self.id
-    }
-
-    fn name(&self) -> &str {
-        &self.name
     }
 }
 
 struct Query;
 
-#[graphql_object(context = Context)]
 impl Query {
     fn film(context: &Context, id: ID) -> Option<Film> {
         context.data.get(&id.to_string()).map(|value| Film {
@@ -64,6 +65,29 @@ impl Query {
             id,
             name: value.get("name").unwrap().as_str().unwrap().to_string(),
         })
+    }
+
+    fn node(context: &Context, id: ID) -> Option<NodeValue> {
+        if id.to_string().contains("people") {
+            Self::person(context, id).map(NodeValue::Person)
+        } else {
+            Self::film(context, id).map(NodeValue::Film)
+        }
+    }
+}
+
+#[graphql_object(context = Context)]
+impl Query {
+    fn film(context: &Context, id: ID) -> Option<Film> {
+        Self::film(context, id)
+    }
+
+    fn person(context: &Context, id: ID) -> Option<Person> {
+        Self::person(context, id)
+    }
+
+    fn node(context: &Context, id: ID) -> Option<NodeValue> {
+        Self::node(context, id)
     }
 }
 
