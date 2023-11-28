@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::Arc;
@@ -9,12 +10,33 @@ use juniper::EmptySubscription;
 use juniper::GraphQLObject;
 use juniper::RootNode;
 use juniper::ID;
+use serde::Deserialize;
 use warp::Filter;
+
+#[derive(Deserialize, Clone)]
+#[serde(tag = "type")]
+enum NodeJson {
+    Person(Person),
+    Film(Film),
+    Planet,
+    Species,
+    Starship,
+    Vehicle,
+}
+
+impl From<NodeJson> for NodeValue {
+    fn from(value: NodeJson) -> Self {
+        match value {
+            NodeJson::Film(film) => NodeValue::Film(film),
+            NodeJson::Person(person) => NodeValue::Person(person),
+            _ => todo!(),
+        }
+    }
+}
 
 #[derive(Clone)]
 struct Context {
-    // TODO: Serialize the JSON into proper structs
-    data: Arc<serde_json::Map<String, serde_json::Value>>,
+    data: Arc<BTreeMap<String, NodeJson>>,
 }
 
 impl juniper::Context for Context {}
@@ -24,7 +46,7 @@ trait Node {
     fn id(&self) -> &ID;
 }
 
-#[derive(GraphQLObject)]
+#[derive(GraphQLObject, Deserialize, Clone)]
 #[graphql(impl = NodeValue)]
 struct Film {
     id: ID,
@@ -37,7 +59,7 @@ impl Node for Film {
     }
 }
 
-#[derive(GraphQLObject)]
+#[derive(GraphQLObject, Deserialize, Clone)]
 #[graphql(impl = NodeValue)]
 struct Person {
     id: ID,
@@ -54,25 +76,25 @@ struct Query;
 
 impl Query {
     fn film(context: &Context, id: ID) -> Option<Film> {
-        context.data.get(&id.to_string()).map(|value| Film {
-            id,
-            title: value.get("title").unwrap().as_str().unwrap().to_string(),
-        })
+        match Self::node(context, id) {
+            Some(NodeValue::Film(film)) => Some(film),
+            _ => None,
+        }
     }
 
     fn person(context: &Context, id: ID) -> Option<Person> {
-        context.data.get(&id.to_string()).map(|value| Person {
-            id,
-            name: value.get("name").unwrap().as_str().unwrap().to_string(),
-        })
+        match Self::node(context, id) {
+            Some(NodeValue::Person(person)) => Some(person),
+            _ => None,
+        }
     }
 
     fn node(context: &Context, id: ID) -> Option<NodeValue> {
-        if id.to_string().contains("people") {
-            Self::person(context, id).map(NodeValue::Person)
-        } else {
-            Self::film(context, id).map(NodeValue::Film)
-        }
+        context
+            .data
+            .get(&id.to_string())
+            .cloned()
+            .map(|node| node.into())
     }
 }
 
@@ -101,12 +123,12 @@ fn schema() -> Schema {
 async fn main() {
     let file = File::open("src/data.json").expect("data.json must be present");
     let reader = BufReader::new(file);
-    let data: Arc<serde_json::Map<String, serde_json::Value>> =
+    let data: Arc<BTreeMap<String, NodeJson>> =
         Arc::new(serde_json::from_reader(reader).expect("data.json must be valid JSON"));
     let data = warp::any().map(move || data.clone());
     let context_extractor = warp::any()
         .and(data)
-        .map(|data: Arc<serde_json::Map<String, serde_json::Value>>| Context { data })
+        .map(|data: Arc<BTreeMap<String, NodeJson>>| Context { data })
         .boxed();
 
     let routes = (warp::post()
