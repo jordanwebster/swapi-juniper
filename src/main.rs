@@ -74,33 +74,45 @@ impl Film {
         before: Option<String>,
         last: Option<i32>,
     ) -> PersonConnection {
-        let first_id = parse_id(self.characters.first().unwrap());
-        let last_id = parse_id(self.characters.last().unwrap());
+        let before = before.as_deref().map(parse_id);
+        let after = after.as_deref().map(parse_id);
+        let edges = self
+            .characters
+            .iter()
+            .filter(|id| {
+                let id = parse_id(id);
+                match (before, after) {
+                    (Some(before), Some(after)) => id > after && id < before,
+                    (Some(before), None) => id < before,
+                    (None, Some(after)) => id > after,
+                    (None, None) => true,
+                }
+            })
+            .collect::<Vec<_>>();
+        if edges.is_empty() {
+            return PersonConnection {
+                page_info: PageInfo {
+                    has_previous_page: false,
+                    has_next_page: false,
+                    start_cursor: None,
+                    end_cursor: None,
+                },
+                edges: vec![],
+            };
+        }
+        let first_id = edges.first().map(|id| parse_id(id)).unwrap();
+        let last_id = edges.last().map(|id| parse_id(id)).unwrap();
 
-        let mut edges: Box<dyn Iterator<Item = &String>> = Box::new(self.characters.iter());
-        if let Some(ref after) = after {
-            edges = Box::new(edges.filter(|id| parse_id(id) > parse_id(after)));
-        }
-        if let Some(ref before) = before {
-            edges = Box::new(edges.filter(|id| parse_id(id) < parse_id(before)));
-        }
-        if let Some(first) = first {
-            edges = Box::new(edges.take(first as usize));
-        }
-        if let Some(last) = last {
-            edges = Box::new(
-                edges
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .take(last as usize)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev(),
-            );
-        }
+        let take_length = first.map(|first| first as usize).unwrap_or(edges.len());
+        let skip_length = match last {
+            Some(last) => take_length.saturating_sub(last as usize),
+            None => 0,
+        };
 
         let characters = edges
+            .into_iter()
+            .take(take_length)
+            .skip(skip_length)
             .map(|id| match context.data.get(id) {
                 Some(NodeJson::Person(person)) => person,
                 _ => panic!("{} is not a Person", id),
