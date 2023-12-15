@@ -59,25 +59,31 @@ struct Film {
     characters: Vec<String>,
 }
 
-#[graphql_object(context = Context)]
-#[graphql(impl = NodeValue)]
-impl Film {
-    fn title(&self) -> &str {
-        &self.title
-    }
+struct Edge<N> {
+    node: Option<N>,
+    cursor: String,
+}
 
-    fn characters(
-        &self,
-        context: &Context,
+struct Connection<N>
+where
+    N: Node,
+{
+    edges: Vec<Edge<N>>,
+    page_info: PageInfo,
+}
+
+impl<N: Node> Connection<N> {
+    fn new(
+        ids: &[String],
+        load: impl Fn(&str) -> N,
         after: Option<String>,
         first: Option<i32>,
         before: Option<String>,
         last: Option<i32>,
-    ) -> PersonConnection {
+    ) -> Connection<N> {
         let before = before.as_deref().map(parse_id);
         let after = after.as_deref().map(parse_id);
-        let edges = self
-            .characters
+        let edges = ids
             .iter()
             .filter(|id| {
                 let id = parse_id(id);
@@ -90,7 +96,7 @@ impl Film {
             })
             .collect::<Vec<_>>();
         if edges.is_empty() {
-            return PersonConnection {
+            return Self {
                 page_info: PageInfo {
                     has_previous_page: false,
                     has_next_page: false,
@@ -113,16 +119,13 @@ impl Film {
             .into_iter()
             .take(take_length)
             .skip(skip_length)
-            .map(|id| match context.data.get(id) {
-                Some(NodeJson::Person(person)) => person,
-                _ => panic!("{} is not a Person", id),
-            })
+            .map(|id| load(id))
             .collect::<Vec<_>>();
 
-        let page_first_id = characters.first().map(|c| parse_id(&c.id));
-        let page_last_id = characters.last().map(|c| parse_id(&c.id));
+        let page_first_id = characters.first().map(|c| parse_id(c.id()));
+        let page_last_id = characters.last().map(|c| parse_id(c.id()));
 
-        PersonConnection {
+        Self {
             page_info: PageInfo {
                 has_previous_page: if let Some(start) = page_first_id {
                     start > first_id
@@ -134,17 +137,68 @@ impl Film {
                 } else {
                     false
                 },
-                start_cursor: characters.first().map(|c| c.id.to_string()),
-                end_cursor: characters.last().map(|c| c.id.to_string()),
+                start_cursor: characters.first().map(|c| c.id().to_string()),
+                end_cursor: characters.last().map(|c| c.id().to_string()),
             },
             edges: characters
                 .into_iter()
-                .map(|c| PersonEdge {
-                    cursor: c.id.to_string(),
-                    node: Some(c.clone()),
+                .map(|c| Edge {
+                    cursor: c.id().to_string(),
+                    node: Some(c),
                 })
                 .collect::<Vec<_>>(),
         }
+    }
+}
+
+#[graphql_object(context = Context)]
+#[graphql(impl = NodeValue)]
+impl Film {
+    fn title(&self) -> &str {
+        &self.title
+    }
+
+    fn characters(
+        &self,
+        context: &Context,
+        after: Option<String>,
+        first: Option<i32>,
+        before: Option<String>,
+        last: Option<i32>,
+    ) -> Connection<Person> {
+        Connection::new(
+            &self.characters,
+            |id| match context.data.get(id) {
+                Some(NodeJson::Person(person)) => person.clone(),
+                _ => panic!("{} is not a Person", id),
+            },
+            after,
+            first,
+            before,
+            last,
+        )
+    }
+}
+
+#[graphql_object(name = "PersonConnection", context = Context)]
+impl Connection<Person> {
+    fn edges(&self) -> &[Edge<Person>] {
+        &self.edges
+    }
+
+    fn page_info(&self) -> &PageInfo {
+        &self.page_info
+    }
+}
+
+#[graphql_object(name = "PersonEdge", context = Context)]
+impl Edge<Person> {
+    fn node(&self) -> Option<&Person> {
+        self.node.as_ref()
+    }
+
+    fn cursor(&self) -> &str {
+        &self.cursor
     }
 }
 
@@ -173,20 +227,6 @@ struct PageInfo {
     has_next_page: bool,
     start_cursor: Option<String>,
     end_cursor: Option<String>,
-}
-
-#[derive(GraphQLObject, Deserialize, Clone)]
-#[graphql(context = Context)]
-struct PersonConnection {
-    page_info: PageInfo,
-    edges: Vec<PersonEdge>,
-}
-
-#[derive(GraphQLObject, Deserialize, Clone)]
-#[graphql(context = Context)]
-struct PersonEdge {
-    node: Option<Person>,
-    cursor: String,
 }
 
 struct Query;
