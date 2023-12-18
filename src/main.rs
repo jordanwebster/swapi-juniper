@@ -5,10 +5,17 @@ use std::sync::Arc;
 
 use juniper::graphql_interface;
 use juniper::graphql_object;
+use juniper::marker::IsOutputType;
+use juniper::meta::MetaType;
 use juniper::EmptyMutation;
 use juniper::EmptySubscription;
 use juniper::GraphQLObject;
+use juniper::GraphQLType;
+use juniper::GraphQLValue;
+use juniper::GraphQLValueAsync;
+use juniper::Registry;
 use juniper::RootNode;
+use juniper::ScalarValue;
 use juniper::ID;
 use regex::Regex;
 use serde::Deserialize;
@@ -50,6 +57,12 @@ impl juniper::Context for Context {}
 #[graphql_interface(for = [Film, Person], context = Context)]
 trait Node {
     fn id(&self) -> &ID;
+}
+
+trait ConnectionEdge {
+    fn connection_type_name() -> &'static str;
+
+    fn edge_type_name() -> &'static str;
 }
 
 #[derive(Deserialize, Clone)]
@@ -191,14 +204,89 @@ impl Connection<Person> {
     }
 }
 
-#[graphql_object(name = "PersonEdge", context = Context)]
-impl Edge<Person> {
-    fn node(&self) -> Option<&Person> {
-        self.node.as_ref()
+impl<N, S> GraphQLType<S> for Edge<N>
+where
+    N: Node + ConnectionEdge + GraphQLType<S>,
+    N::Context: juniper::Context,
+    S: ScalarValue,
+{
+    fn name(_info: &<N as GraphQLValue<S>>::TypeInfo) -> Option<&'static str> {
+        Some(N::edge_type_name())
     }
 
-    fn cursor(&self) -> &str {
-        &self.cursor
+    fn meta<'r>(
+        info: &<N as GraphQLValue<S>>::TypeInfo,
+        registry: &mut Registry<'r, S>,
+    ) -> MetaType<'r, S>
+    where
+        S: 'r,
+    {
+        let fields = &[
+            registry.field::<&N>("node", info),
+            registry.field::<&String>("cursor", &()),
+        ];
+        registry.build_object_type::<Self>(info, fields).into_meta()
+    }
+}
+
+impl<N, S> IsOutputType<S> for Edge<N>
+where
+    N: GraphQLType<S>,
+    S: ScalarValue,
+{
+}
+
+impl<N, S> GraphQLValue<S> for Edge<N>
+where
+    N: Node + ConnectionEdge + GraphQLType<S>,
+    N::Context: juniper::Context,
+    S: ScalarValue,
+{
+    type Context = N::Context;
+    type TypeInfo = <N as GraphQLValue<S>>::TypeInfo;
+
+    fn type_name<'i>(&self, info: &'i Self::TypeInfo) -> Option<&'i str> {
+        <Self as GraphQLType<S>>::name(info)
+    }
+
+    fn resolve_field(
+        &self,
+        info: &Self::TypeInfo,
+        field_name: &str,
+        _arguments: &juniper::Arguments<S>,
+        executor: &juniper::Executor<Self::Context, S>,
+    ) -> juniper::ExecutionResult<S> {
+        match field_name {
+            "node" => executor.resolve_with_ctx(info, &self.node),
+            "cursor" => executor.resolve_with_ctx(&(), &self.cursor),
+            _ => panic!("Field {} not found on Edge", field_name),
+        }
+    }
+}
+
+impl<N, S> GraphQLValueAsync<S> for Edge<N>
+where
+    N: Node + ConnectionEdge + GraphQLType<S> + GraphQLValueAsync<S> + Send + Sync,
+    N::TypeInfo: Sync,
+    N::Context: juniper::Context + Sync,
+    S: ScalarValue + Send + Sync,
+{
+    fn resolve_field_async<'a>(
+        &'a self,
+        info: &'a Self::TypeInfo,
+        field_name: &'a str,
+        _arguments: &'a juniper::Arguments<S>,
+        executor: &'a juniper::Executor<Self::Context, S>,
+    ) -> juniper::BoxFuture<'a, juniper::ExecutionResult<S>> {
+        let f = async move {
+            match field_name {
+                "node" => executor.resolve_with_ctx_async(info, &self.node).await,
+                "cursor" => executor.resolve_with_ctx(&(), &self.cursor),
+                _ => panic!("Field {} not found on Edge", field_name),
+            }
+        };
+        use ::juniper::futures::future;
+        future::FutureExt::boxed(f)
     }
 }
 
@@ -218,6 +306,16 @@ struct Person {
 impl Node for Person {
     fn id(&self) -> &ID {
         &self.id
+    }
+}
+
+impl ConnectionEdge for Person {
+    fn connection_type_name() -> &'static str {
+        "PersonConnection"
+    }
+
+    fn edge_type_name() -> &'static str {
+        "PersonEdge"
     }
 }
 
