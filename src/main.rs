@@ -125,15 +125,15 @@ impl<N: Node> Connection<N> {
             None => 0,
         };
 
-        let characters = edges
+        let edges = edges
             .into_iter()
             .take(take_length)
             .skip(skip_length)
             .map(|id| load(id))
             .collect::<Vec<_>>();
 
-        let page_first_id = characters.first().map(|c| parse_id(c.id()));
-        let page_last_id = characters.last().map(|c| parse_id(c.id()));
+        let page_first_id = edges.first().map(|c| parse_id(c.id()));
+        let page_last_id = edges.last().map(|c| parse_id(c.id()));
 
         Self {
             page_info: PageInfo {
@@ -147,10 +147,10 @@ impl<N: Node> Connection<N> {
                 } else {
                     false
                 },
-                start_cursor: characters.first().map(|c| c.id().to_string()),
-                end_cursor: characters.last().map(|c| c.id().to_string()),
+                start_cursor: edges.first().map(|c| c.id().to_string()),
+                end_cursor: edges.last().map(|c| c.id().to_string()),
             },
-            edges: characters
+            edges: edges
                 .into_iter()
                 .map(|c| Edge {
                     cursor: c.id().to_string(),
