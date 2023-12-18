@@ -72,6 +72,116 @@ struct Film {
     characters: Vec<String>,
 }
 
+impl Node for Film {
+    fn id(&self) -> &ID {
+        &self.id
+    }
+}
+
+impl ConnectionEdge for Film {
+    fn connection_type_name() -> &'static str {
+        "FilmConnection"
+    }
+
+    fn edge_type_name() -> &'static str {
+        "FilmEdge"
+    }
+}
+
+#[graphql_object(context = Context, impl = NodeValue)]
+impl Film {
+    fn id(&self) -> &ID {
+        &self.id
+    }
+
+    fn title(&self) -> &str {
+        &self.title
+    }
+
+    fn characters(
+        &self,
+        context: &Context,
+        after: Option<String>,
+        first: Option<i32>,
+        before: Option<String>,
+        last: Option<i32>,
+    ) -> Connection<Person> {
+        Connection::new(
+            &self.characters,
+            |id| match context.data.get(id) {
+                Some(NodeJson::Person(person)) => person.clone(),
+                _ => panic!("{} is not a Person", id),
+            },
+            after,
+            first,
+            before,
+            last,
+        )
+    }
+}
+
+#[derive(Deserialize, Clone)]
+struct Person {
+    id: ID,
+    name: String,
+    films: Vec<String>,
+}
+
+impl Node for Person {
+    fn id(&self) -> &ID {
+        &self.id
+    }
+}
+impl ConnectionEdge for Person {
+    fn connection_type_name() -> &'static str {
+        "PersonConnection"
+    }
+
+    fn edge_type_name() -> &'static str {
+        "PersonEdge"
+    }
+}
+
+#[graphql_object(context = Context, impl = NodeValue)]
+impl Person {
+    fn id(&self) -> &ID {
+        &self.id
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn films(
+        &self,
+        context: &Context,
+        after: Option<String>,
+        first: Option<i32>,
+        before: Option<String>,
+        last: Option<i32>,
+    ) -> Connection<Film> {
+        Connection::new(
+            &self.films,
+            |id| match context.data.get(id) {
+                Some(NodeJson::Film(film)) => film.clone(),
+                _ => panic!("{} is not a Film", id),
+            },
+            after,
+            first,
+            before,
+            last,
+        )
+    }
+}
+
+#[derive(GraphQLObject, Deserialize, Clone)]
+struct PageInfo {
+    has_previous_page: bool,
+    has_next_page: bool,
+    start_cursor: Option<String>,
+    end_cursor: Option<String>,
+}
+
 struct Edge<N> {
     node: Option<N>,
     cursor: String,
@@ -158,35 +268,6 @@ impl<N: Node> Connection<N> {
                 })
                 .collect::<Vec<_>>(),
         }
-    }
-}
-
-#[graphql_object(context = Context)]
-#[graphql(impl = NodeValue)]
-impl Film {
-    fn title(&self) -> &str {
-        &self.title
-    }
-
-    fn characters(
-        &self,
-        context: &Context,
-        after: Option<String>,
-        first: Option<i32>,
-        before: Option<String>,
-        last: Option<i32>,
-    ) -> Connection<Person> {
-        Connection::new(
-            &self.characters,
-            |id| match context.data.get(id) {
-                Some(NodeJson::Person(person)) => person.clone(),
-                _ => panic!("{} is not a Person", id),
-            },
-            after,
-            first,
-            before,
-            last,
-        )
     }
 }
 
@@ -360,43 +441,6 @@ where
         use ::juniper::futures::future;
         future::FutureExt::boxed(f)
     }
-}
-
-impl Node for Film {
-    fn id(&self) -> &ID {
-        &self.id
-    }
-}
-
-#[derive(GraphQLObject, Deserialize, Clone)]
-#[graphql(impl = NodeValue, context = Context)]
-struct Person {
-    id: ID,
-    name: String,
-}
-
-impl Node for Person {
-    fn id(&self) -> &ID {
-        &self.id
-    }
-}
-
-impl ConnectionEdge for Person {
-    fn connection_type_name() -> &'static str {
-        "PersonConnection"
-    }
-
-    fn edge_type_name() -> &'static str {
-        "PersonEdge"
-    }
-}
-
-#[derive(GraphQLObject, Deserialize, Clone)]
-struct PageInfo {
-    has_previous_page: bool,
-    has_next_page: bool,
-    start_cursor: Option<String>,
-    end_cursor: Option<String>,
 }
 
 struct Query;
